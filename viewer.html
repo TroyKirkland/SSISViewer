@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SSIS Visualiser</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --line: #e2e5ea; --text: #1f2933; --muted: #6b7785;
+    --accent: #2b6cd4; --accent-soft: #e8f0fc; --code-bg: #f7f8fa;
+    --ok: #2e9e44; --fail: #d13438; --done: #2b6cd4;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    font-size: 13px; color: var(--text);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); }
+  button, select, input { font: inherit; color: inherit; }
+  .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  .btn:hover { border-color: #c4cad3; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  #app { display: grid; grid-template-rows: 48px 1fr; height: 100vh; }
+  header { display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 650; letter-spacing: -.01em; }
+  header h1 span { color: var(--accent); }
+  header .grow { flex: 1; }
+  #pkgSel { max-width: 280px; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; background: var(--panel); }
+  #search { width: 220px; border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; background: var(--bg); }
+
+  #body { display: grid; grid-template-columns: 290px 1fr 400px; min-height: 0; }
+  aside, #details { background: var(--panel); overflow: auto; min-height: 0; }
+  aside { border-right: 1px solid var(--line); }
+  #details { border-left: 1px solid var(--line); }
+
+  /* Sidebar tree */
+  .group { border-bottom: 1px solid var(--line); }
+  .group > summary { list-style: none; cursor: pointer; padding: 9px 12px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); display: flex; justify-content: space-between; }
+  .group > summary::-webkit-details-marker { display: none; }
+  .group > summary::before { content: "▸"; margin-right: 6px; transition: transform .1s; display: inline-block; }
+  .group[open] > summary::before { transform: rotate(90deg); }
+  .group > summary .cnt { font-weight: 500; }
+  .group > summary .lbl { flex: 1; }
+  ul.tree { list-style: none; margin: 0; padding: 0 0 8px 0; }
+  ul.tree ul { list-style: none; margin: 0; padding-left: 14px; }
+  ul.tree li.closed > ul { display: none; }
+  .ti { display: flex; align-items: center; gap: 6px; padding: 3px 10px 3px 6px; cursor: pointer; white-space: nowrap; border-radius: 4px; margin: 0 4px; }
+  .ti:hover { background: var(--bg); }
+  .ti.sel { background: var(--accent-soft); }
+  .ti .car { width: 12px; color: var(--muted); font-size: 10px; text-align: center; flex: none; }
+  .ti .tn { overflow: hidden; text-overflow: ellipsis; }
+  .ti .tx { color: var(--muted); font-size: 11px; margin-left: auto; padding-left: 6px; }
+  .ti.disabled .tn { color: var(--muted); text-decoration: line-through; }
+  .tb { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 16px; padding: 0 3px; border-radius: 3px; color: #fff; font-size: 9px; font-weight: 700; letter-spacing: .02em; }
+  li.hidden { display: none; }
+
+  /* Main canvas */
+  main { display: grid; grid-template-rows: 40px 1fr; min-width: 0; min-height: 0; }
+  #tabs { display: flex; align-items: center; gap: 4px; padding: 0 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .tab { white-space: nowrap; border: none; background: none; padding: 8px 10px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .tab:disabled { opacity: .4; cursor: default; }
+  #tabs select { border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; background: var(--panel); max-width: 260px; }
+  #tabs .grow { flex: 1; }
+  #stage { position: relative; overflow: hidden; min-height: 0; background-color: #fbfbfc;
+    background-image: radial-gradient(#dfe3e8 1px, transparent 1px); background-size: 18px 18px; }
+  #canvas { width: 100%; height: 100%; display: block; cursor: grab; user-select: none; }
+  #canvas.panning { cursor: grabbing; }
+  #zoom { position: absolute; right: 12px; top: 12px; display: flex; gap: 4px; }
+  #zoom .btn { padding: 3px 9px; }
+  #legend { position: absolute; left: 12px; bottom: 12px; background: rgba(255,255,255,.92); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 11px; color: var(--muted); display: flex; gap: 12px; }
+  #legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 4px; }
+  #stageMsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); pointer-events: none; }
+
+  /* Empty / drop */
+  #drop { position: fixed; inset: 48px 0 0 0; display: flex; align-items: center; justify-content: center; background: var(--bg); z-index: 5; }
+  #drop .card { text-align: center; padding: 48px 64px; border: 2px dashed #c4cad3; border-radius: 14px; background: var(--panel); max-width: 560px; }
+  #drop h2 { margin: 0 0 8px; font-size: 20px; }
+  #drop p { color: var(--muted); margin: 6px 0 18px; line-height: 1.5; }
+  body.dragging #drop, body.dragging #dragOverlay { display: flex; }
+  #dragOverlay { display: none; position: fixed; inset: 0; background: rgba(43,108,212,.12); border: 3px dashed var(--accent); z-index: 10; align-items: center; justify-content: center; font-size: 18px; color: var(--accent); font-weight: 600; pointer-events: none; }
+  #err { color: var(--fail); white-space: pre-wrap; margin-top: 12px; }
+
+  /* Details */
+  #details .empty { padding: 24px; color: var(--muted); line-height: 1.5; }
+  .dh { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: flex-start; position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .dh .tb { height: 26px; min-width: 34px; font-size: 11px; border-radius: 6px; margin-top: 2px; }
+  .dh h2 { margin: 0; font-size: 15px; word-break: break-word; }
+  .dh .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .sec { border-bottom: 1px solid var(--line); }
+  .sec > summary { cursor: pointer; padding: 9px 16px; font-weight: 600; font-size: 12px; color: var(--muted); list-style: none; }
+  .sec > summary::-webkit-details-marker { display: none; }
+  .sec > summary::before { content: "▸"; display: inline-block; margin-right: 6px; transition: transform .1s; }
+  .sec[open] > summary::before { transform: rotate(90deg); }
+  .secb { padding: 0 16px 12px; }
+  table.kv { width: 100%; border-collapse: collapse; }
+  table.kv th { text-align: left; font-weight: 500; color: var(--muted); padding: 4px 10px 4px 0; vertical-align: top; width: 38%; word-break: break-word; }
+  table.kv td { padding: 4px 0; word-break: break-word; }
+  table.grid { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.grid th { text-align: left; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--line); padding: 4px 6px 4px 0; }
+  table.grid td { border-bottom: 1px solid #f0f2f5; padding: 4px 6px 4px 0; vertical-align: top; word-break: break-word; }
+  pre.code { margin: 4px 0 0; background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font: 12px/1.45 ui-monospace, "SF Mono", Menlo, monospace; white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; }
+  .kw { color: #0b57d0; font-weight: 600; }
+  .str { color: #a2470b; }
+  .cmt { color: #6a8759; font-style: italic; }
+  .num { color: #7c3aed; }
+  .var { color: #b4237a; }
+  a.lnk { color: var(--accent); text-decoration: none; cursor: pointer; }
+  a.lnk:hover { text-decoration: underline; }
+  .pill { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; background: var(--bg); border: 1px solid var(--line); margin-right: 4px; }
+  .pill.ok { color: var(--ok); border-color: #bfe3c6; background: #eef8f0; }
+  .pill.fail { color: var(--fail); border-color: #f2c4c5; background: #fdf0f0; }
+  .pill.done { color: var(--done); border-color: #c3d6f5; background: #eef4fd; }
+  .muted { color: var(--muted); }
+  .actions { padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  ul.links { margin: 0; padding-left: 16px; }
+  ul.links li { margin: 2px 0; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>SSIS <span>Visualiser</span></h1>
+    <button class="btn primary" id="openBtn">Open .dtsx…</button>
+    <input type="file" id="file" accept=".dtsx,.xml" multiple hidden>
+    <select id="pkgSel" hidden></select>
+    <div class="grow"></div>
+    <input id="search" type="search" placeholder="Find task / component…" disabled>
+    <button class="btn" id="exportBtn" disabled title="Download the current diagram as SVG">Export SVG</button>
+  </header>
+  <div id="body">
+    <aside id="side"></aside>
+    <main>
+      <div id="tabs">
+        <button class="tab" data-tab="cf">Control Flow</button>
+        <button class="tab" data-tab="df">Data Flow</button>
+        <select id="dfSel" hidden></select>
+        <button class="tab" data-tab="eh">Event Handlers</button>
+        <select id="ehSel" hidden></select>
+        <div class="grow"></div>
+      </div>
+      <div id="stage">
+        <svg id="canvas" xmlns="http://www.w3.org/2000/svg"><g id="vp"></g></svg>
+        <div id="stageMsg" hidden></div>
+        <div id="legend"></div>
+        <div id="zoom">
+          <button class="btn" id="zOut" title="Zoom out">−</button>
+          <button class="btn" id="zFit" title="Fit to screen">Fit</button>
+          <button class="btn" id="zIn" title="Zoom in">+</button>
+        </div>
+      </div>
+    </main>
+    <section id="details"><div class="empty">Select a task, component, connection or variable to see its details.</div></section>
+  </div>
+</div>
+<div id="drop">
+  <div class="card">
+    <h2>Open an SSIS package</h2>
+    <p>Drop one or more <b>.dtsx</b> files anywhere on this window, or pick them below.<br>
+       Everything is parsed locally in your browser. Nothing is uploaded.</p>
+    <button class="btn primary" id="openBtn2">Choose .dtsx files…</button>
+    <div id="err"></div>
+  </div>
+</div>
+<div id="dragOverlay">Drop .dtsx files to load</div>
+
+<!-- dtsx2html.py replaces the contents of this block to embed packages -->
+<script type="application/json" id="embedded-packages">[]</script>
+
+<script>
+"use strict";
+/* =====================================================================
+   Helpers
+   ===================================================================== */
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const kids = (el, name) => el ? [...el.children].filter(c => c.localName === name) : [];
+const kid = (el, name) => kids(el, name)[0] || null;
+const attrsOf = el => [...el.attributes].filter(a => !a.name.startsWith("xmlns")).map(a => [a.localName, a.value]);
+
+/** Read a DTS property: attribute (2012+ format) or <DTS:Property DTS:Name=".."> child (2008 format). */
+function A(el, name) {
+  if (!el) return null;
+  for (const a of el.attributes) if (a.localName === name) return a.value;
+  for (const c of el.children) {
+    if (c.localName === "Property") {
+      for (const a of c.attributes) if (a.localName === "Name" && a.value === name) return c.textContent;
+    }
+  }
+  return null;
+}
+const truthy = v => /^(true|-1|1)$/i.test(String(v ?? "").trim());
+
+function collectText(el, skip, out = []) {
+  for (const a of el.attributes) out.push(a.value);
+  for (const c of el.childNodes) {
+    if (c.nodeType === 1) { if (!skip.has(c.localName)) collectText(c, skip, out); }
+    else if (c.nodeType === 3 || c.nodeType === 4) { const t = c.nodeValue.trim(); if (t) out.push(t); }
+  }
+  return out;
+}
+
+const VAR_TYPES = { 0: "Empty", 2: "Int16", 3: "Int32", 4: "Single", 5: "Double", 6: "Currency", 7: "DateTime", 8: "String", 11: "Boolean", 13: "Object", 14: "Decimal", 16: "SByte", 17: "Byte", 18: "UInt16", 19: "UInt32", 20: "Int64", 21: "UInt64" };
+const PC_VALUE = { 0: "Success", 1: "Failure", 2: "Completion" };
+const PC_EVALOP = { 1: "Expression", 2: "Constraint", 3: "Expression and Constraint", 4: "Expression or Constraint" };
+const maskSecrets = s => String(s ?? "").replace(/((?:password|pwd)\s*=\s*)("[^"]*"|[^;]*)/gi, "$1••••••");
+
+/* =====================================================================
+   Type metadata (labels, badges, colours)
+   ===================================================================== */
+const TASK_TYPES = [
+  [/pipeline/i, "Data Flow Task", "DF", "#0f8a8a"],
+  [/executesql/i, "Execute SQL Task", "SQL", "#5c6bc0"],
+  [/sequence/i, "Sequence Container", "SEQ", "#6b7280"],
+  [/foreachloop/i, "Foreach Loop Container", "EACH", "#6b7280"],
+  [/forloop/i, "For Loop Container", "FOR", "#6b7280"],
+  [/scripttask/i, "Script Task", "C#", "#8e44ad"],
+  [/filesystem/i, "File System Task", "FS", "#c77d00"],
+  [/sendmail/i, "Send Mail Task", "MAIL", "#d35400"],
+  [/executepackage/i, "Execute Package Task", "PKG", "#2b6cd4"],
+  [/executeprocess/i, "Execute Process Task", "EXE", "#475569"],
+  [/expressiontask/i, "Expression Task", "fx", "#b4237a"],
+  [/ftp/i, "FTP Task", "FTP", "#c77d00"],
+  [/bulkinsert/i, "Bulk Insert Task", "BULK", "#5c6bc0"],
+  [/webservice/i, "Web Service Task", "WEB", "#475569"],
+  [/xmltask/i, "XML Task", "XML", "#475569"],
+  [/dataprofil/i, "Data Profiling Task", "PROF", "#475569"],
+  [/cdccontrol/i, "CDC Control Task", "CDC", "#475569"],
+  [/eventhandler/i, "Event Handler", "EVT", "#b45309"],
+  [/package/i, "Package", "PKG", "#1f2933"],
+];
+function taskMeta(type) {
+  for (const [re, label, badge, color] of TASK_TYPES) if (re.test(type)) return { label, badge, color };
+  let s = String(type || "Task").split(",")[0].replace(/^STOCK:/i, "").split(".").pop();
+  s = s.replace(/([a-z])([A-Z])/g, "$1 $2");
+  return { label: s, badge: s.replace(/[^A-Z]/g, "").slice(0, 4) || s.slice(0, 3).toUpperCase(), color: "#64748b" };
+}
+
+const COMP_TYPES = {
+  oledbsource: ["OLE DB Source", "SRC"], oledbdestination: ["OLE DB Destination", "DST"],
+  flatfilesource: ["Flat File Source", "SRC"], flatfiledestination: ["Flat File Destination", "DST"],
+  excelsource: ["Excel Source", "SRC"], exceldestination: ["Excel Destination", "DST"],
+  rawsource: ["Raw File Source", "SRC"], rawdestination: ["Raw File Destination", "DST"],
+  derivedcolumn: ["Derived Column", "fx"], lookup: ["Lookup", "LKP"], conditionalsplit: ["Conditional Split", "IF"],
+  rowcount: ["Row Count", "#"], unionall: ["Union All", "U"], mergejoin: ["Merge Join", "JOIN"], merge: ["Merge", "MRG"],
+  sort: ["Sort", "SORT"], aggregate: ["Aggregate", "AGG"], multicast: ["Multicast", "MC"], dataconvert: ["Data Conversion", "CNV"],
+  oledbcommand: ["OLE DB Command", "CMD"], copymap: ["Copy Column", "CPY"], charactermap: ["Character Map", "CHR"],
+  slowlychangingdimension: ["Slowly Changing Dimension", "SCD"], pivot: ["Pivot", "PVT"], unpivot: ["Unpivot", "UPV"],
+  fuzzylookup: ["Fuzzy Lookup", "FZL"], fuzzygrouping: ["Fuzzy Grouping", "FZG"], audit: ["Audit", "AUD"],
+  percentagesampling: ["Percentage Sampling", "SMP"], rowsampling: ["Row Sampling", "SMP"], cachetransform: ["Cache Transform", "CACHE"],
+  balanceddatadistributor: ["Balanced Data Distributor", "BDD"], recordsetdestination: ["Recordset Destination", "DST"],
+  sqlserverdestination: ["SQL Server Destination", "DST"], odbcsource: ["ODBC Source", "SRC"], odbcdestination: ["ODBC Destination", "DST"],
+};
+const CAT_COLORS = { source: "#2e9e44", transform: "#2b6cd4", dest: "#c77d00" };
+function compMeta(c) {
+  const cls = (c.classId || "").split(".").pop().toLowerCase();
+  if (COMP_TYPES[cls]) return { label: COMP_TYPES[cls][0], badge: COMP_TYPES[cls][1] };
+  const uct = (c.props.find(p => p.name === "UserComponentTypeName") || {}).value || "";
+  if (/ScriptComponent/i.test(uct)) return { label: "Script Component", badge: "C#" };
+  if (/ADONETSource/i.test(uct)) return { label: "ADO NET Source", badge: "SRC" };
+  if (/ADONETDestination/i.test(uct)) return { label: "ADO NET Destination", badge: "DST" };
+  const ci = (c.contactInfo || "").split(";")[0].trim();
+  const label = (ci && ci.length < 40) ? ci : (uct.split(",")[0].split(".").pop() || c.classId || "Component");
+  return { label, badge: label.replace(/[^A-Z]/g, "").slice(0, 4) || "CMP" };
+}
+const ACCESS_MODE_SRC = { 0: "Table or view", 1: "Table or view name variable", 2: "SQL command", 3: "SQL command from variable" };
+const ACCESS_MODE_DST = { 0: "Table or view", 1: "Table or view name variable", 2: "SQL command", 3: "Table or view – fast load", 4: "Table or view name variable – fast load" };
+
+/* =====================================================================
+   Parsing
+   ===================================================================== */
+function decodeBytes(buf) {
+  const b = new Uint8Array(buf);
+  if (b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder("utf-16le").decode(buf);
+  if (b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder("utf-16be").decode(buf);
+  return new TextDecoder("utf-8").decode(buf);
+}
+
+function parsePackage(xmlText, fileName) {
+  const doc = new DOMParser().parseFromString(xmlText, "application/xml");
+  const perr = doc.getElementsByTagName("parsererror")[0];
+  if (perr) throw new Error(`${fileName}: not valid XML.\n${perr.textContent.slice(0, 300)}`);
+  const root = doc.documentElement;
+  if (root.localName !== "Executable") throw new Error(`${fileName}: doesn't look like an SSIS package (root element is <${root.nodeName}>).`);
+
+  const pkg = { fileName, nodes: new Map(), alias: new Map(), connections: [], connByKey: new Map(), variables: [], parameters: [],
+                dataflows: [], eventHandlers: [], users: [], annotations: [], seq: 0 };
+
+  // Connection managers
+  for (const el of kids(kid(root, "ConnectionManagers"), "ConnectionManager")) {
+    const inner = kid(kid(el, "ObjectData"), "ConnectionManager") || kid(kid(el, "ObjectData"), "*");
+    const c = {
+      kind: "conn", el, inner, name: A(el, "ObjectName") || "(unnamed)", type: A(el, "CreationName") || "",
+      dtsid: A(el, "DTSID"), refId: A(el, "refId"), description: A(el, "Description") || "",
+      connStr: inner ? (A(inner, "ConnectionString") || "") : "",
+      exprs: kids(el, "PropertyExpression").map(p => [A(p, "Name"), p.textContent]),
+    };
+    pkg.connections.push(c);
+    for (const k of [c.name, c.dtsid, c.refId, `Package.ConnectionManagers[${c.name}]`]) if (k) pkg.connByKey.set(k, c);
+    pkg.users.push({ label: `Connection: ${c.name}`, nav: { t: "conn", key: c.dtsid || c.name }, text: collectText(el, new Set()).join("\n"), self: c });
+  }
+  // Parameters
+  for (const el of kids(kid(root, "PackageParameters"), "PackageParameter")) {
+    pkg.parameters.push({ kind: "param", el, name: A(el, "ObjectName"), dtype: VAR_TYPES[A(el, "DataType")] || A(el, "DataType") || "",
+      value: A(el, "ParameterValue") ?? "", required: truthy(A(el, "Required")), sensitive: truthy(A(el, "Sensitive")),
+      description: A(el, "Description") || "" });
+  }
+
+  pkg.root = parseExec(root, pkg, null, null, "package");
+  pkg.name = pkg.root.name || fileName;
+
+  // Resolve precedence constraint endpoints (refId or DTSID)
+  for (const n of pkg.nodes.values()) {
+    for (const c of n.constraints) {
+      c.from = pkg.alias.get(c.fromRaw) || c.fromRaw;
+      c.to = pkg.alias.get(c.toRaw) || c.toRaw;
+    }
+  }
+  // Design-time annotations (sticky notes)
+  for (const dt of root.getElementsByTagNameNS("*", "DesignTimeProperties")) {
+    try {
+      const d = new DOMParser().parseFromString(dt.textContent.trim(), "application/xml");
+      for (const a of d.getElementsByTagName("AnnotationLayout")) {
+        const t = a.getAttribute("Text"); if (t) pkg.annotations.push(t);
+      }
+    } catch (e) { /* ignore layout parse issues */ }
+  }
+  return pkg;
+}
+
+function parseExec(el, pkg, parent, scopeRoot, forcedKind) {
+  const type = A(el, "ExecutableType") || A(el, "CreationName") || (forcedKind === "eventhandler" ? "EventHandler" : "");
+  const n = {
+    id: A(el, "refId") || A(el, "DTSID") || `#n${pkg.seq++}`, dtsid: A(el, "DTSID"),
+    name: forcedKind === "eventhandler" ? (A(el, "EventName") || A(el, "ObjectName") || "EventHandler") : (A(el, "ObjectName") || "(unnamed)"),
+    type, el, parent, children: [], constraints: [], eventHandlers: [], disabled: truthy(A(el, "Disabled")),
+    description: A(el, "Description") || "",
+  };
+  const od = kid(el, "ObjectData");
+  const pipeEl = kid(od, "pipeline");
+  n.kind = forcedKind || (pipeEl || /pipeline/i.test(type) ? "dataflow"
+          : (/sequence|forloop|foreachloop/i.test(type) || kid(el, "Executables")) ? "container" : "task");
+  n.meta = taskMeta(n.kind === "dataflow" ? "pipeline" : type);
+  n.scopeRoot = scopeRoot || n;
+  pkg.nodes.set(n.id, n);
+  if (n.dtsid) pkg.alias.set(n.dtsid, n.id);
+  if (A(el, "refId")) pkg.alias.set(A(el, "refId"), n.id);
+
+  // Variables defined in this scope
+  for (const v of kids(kid(el, "Variables"), "Variable").concat(kids(el, "Variable"))) {
+    const vv = kid(v, "VariableValue");
+    const variable = { kind: "var", el: v, ns: A(v, "Namespace") || "User", name: A(v, "ObjectName"), scope: n,
+      dtype: VAR_TYPES[vv && A(vv, "DataType")] || (vv && A(vv, "DataType")) || "", value: vv ? vv.textContent : "",
+      expr: A(v, "Expression") || "", evalAsExpr: truthy(A(v, "EvaluateAsExpression")), readOnly: truthy(A(v, "ReadOnly")),
+      description: A(v, "Description") || "" };
+    variable.key = `${variable.ns}::${variable.name}|${n.id}`;
+    pkg.variables.push(variable);
+    if (variable.expr) pkg.users.push({ label: `Variable: ${variable.ns}::${variable.name}`, nav: { t: "var", key: variable.key }, text: variable.expr, self: variable });
+  }
+
+  // Children (2012+: <Executables><Executable/>; 2008: <Executable/> directly)
+  for (const c of kids(kid(el, "Executables"), "Executable").concat(kids(el, "Executable").filter(x => !x.hasAttribute("IDREF")))) {
+    n.children.push(parseExec(c, pkg, n, scopeRoot || (forcedKind === "eventhandler" ? n : null)));
+  }
+  // Precedence constraints
+  for (const c of kids(kid(el, "PrecedenceConstraints"), "PrecedenceConstraint").concat(kids(el, "PrecedenceConstraint"))) {
+    let fromRaw = A(c, "From"), toRaw = A(c, "To");
+    if (!fromRaw || !toRaw) {
+      for (const r of kids(c, "Executable")) {
+        const idref = r.getAttribute("IDREF");
+        if (A(r, "IsFrom") === "-1") fromRaw = idref; else toRaw = idref;
+      }
+    }
+    n.constraints.push({ kind: "cons", el: c, name: A(c, "ObjectName") || "Constraint", fromRaw, toRaw,
+      value: +(A(c, "Value") ?? 0), evalOp: +(A(c, "EvalOp") ?? 2), expression: A(c, "Expression") || "",
+      logicalAnd: !/^(false|0)$/i.test(A(c, "LogicalAnd") ?? "True"), scope: n });
+  }
+  // Event handlers
+  for (const h of kids(kid(el, "EventHandlers"), "EventHandler").concat(kids(el, "EventHandler"))) {
+    const hn = parseExec(h, pkg, n, null, "eventhandler");
+    hn.owner = n;
+    hn.scopeRoot = hn;
+    n.eventHandlers.push(hn);
+    pkg.eventHandlers.push(hn);
+  }
+  // Data flow
+  if (n.kind === "dataflow") { parsePipeline(n, pipeEl, pkg); pkg.dataflows.push(n); }
+
+  if (forcedKind !== "package" && forcedKind !== "eventhandler") {
+    const skip = new Set(["Executables", "Executable", "EventHandlers", "EventHandler", "PrecedenceConstraints", "PrecedenceConstraint", "pipeline", "Variables", "Variable", "DesignTimeProperties"]);
+    pkg.users.push({ label: n.name, nav: { t: "exec", id: n.id }, text: collectText(el, skip).join("\n"), self: n });
+  }
+  return n;
+}
+
+function parsePipeline(dft, pipeEl, pkg) {
+  const components = [], ports = new Map(), lineage = new Map();
+  const colOf = (c) => ({
+    name: c.getAttribute("name") || c.getAttribute("cachedName") || "", dataType: c.getAttribute("dataType") || c.getAttribute("cachedDataType") || "",
+    length: c.getAttribute("length") || c.getAttribute("cachedLength") || "", precision: c.getAttribute("precision") || c.getAttribute("cachedPrecision") || "",
+    scale: c.getAttribute("scale") || c.getAttribute("cachedScale") || "", lineageId: c.getAttribute("lineageId") || "",
+    refId: c.getAttribute("refId") || c.getAttribute("id") || "", extId: c.getAttribute("externalMetadataColumnId") || "",
+    props: kids(kid(c, "properties"), "property").map(p => ({ name: p.getAttribute("name"), value: p.textContent })),
+  });
+  for (const ce of kids(kid(pipeEl, "components"), "component")) {
+    const c = {
+      kind: "comp", el: ce, dft, id: ce.getAttribute("refId") || `${dft.id}/c${ce.getAttribute("id")}`,
+      name: ce.getAttribute("name") || "(unnamed)", classId: ce.getAttribute("componentClassID") || "",
+      description: ce.getAttribute("description") || "", contactInfo: ce.getAttribute("contactInfo") || "",
+      props: kids(kid(ce, "properties"), "property").map(p => ({ name: p.getAttribute("name"), value: p.textContent, conv: p.getAttribute("typeConverter") })),
+      conns: kids(kid(ce, "connections"), "connection").map(x => ({ name: x.getAttribute("name"), ref: x.getAttribute("connectionManagerRefId") || x.getAttribute("connectionManagerID") || "" })),
+      inputs: [], outputs: [],
+    };
+    for (const ie of kids(kid(ce, "inputs"), "input")) {
+      const inp = { id: ie.getAttribute("refId") || ie.getAttribute("id"), name: ie.getAttribute("name") || "",
+        columns: kids(kid(ie, "inputColumns"), "inputColumn").map(colOf), external: kids(kid(ie, "externalMetadataColumns"), "externalMetadataColumn").map(colOf) };
+      c.inputs.push(inp); ports.set(inp.id, { comp: c, port: inp });
+    }
+    for (const oe of kids(kid(ce, "outputs"), "output")) {
+      const props = kids(kid(oe, "properties"), "property").map(p => ({ name: p.getAttribute("name"), value: p.textContent }));
+      const out = { id: oe.getAttribute("refId") || oe.getAttribute("id"), name: oe.getAttribute("name") || "", isError: truthy(oe.getAttribute("isErrorOut")),
+        columns: kids(kid(oe, "outputColumns"), "outputColumn").map(colOf), external: kids(kid(oe, "externalMetadataColumns"), "externalMetadataColumn").map(colOf), props };
+      out.expression = (props.find(p => p.name === "FriendlyExpression") || props.find(p => p.name === "Expression") || {}).value || "";
+      out.isDefault = truthy((props.find(p => p.name === "IsDefaultOut") || {}).value);
+      for (const col of out.columns) { if (col.lineageId) lineage.set(col.lineageId, col.name); if (col.refId) lineage.set(col.refId, col.name); }
+      c.outputs.push(out); ports.set(out.id, { comp: c, port: out });
+    }
+    const realOuts = c.outputs.filter(o => !o.isError);
+    c.cat = !c.inputs.length ? "source" : !realOuts.length ? "dest" : "transform";
+    c.meta = compMeta(c);
+    components.push(c);
+    pkg.users.push({ label: `${dft.name} › ${c.name}`, nav: { t: "comp", dft: dft.id, id: c.id }, text: collectText(ce, new Set()).join("\n"), self: c });
+  }
+  // Expression lineage → friendly names
+  const friendly = s => String(s || "").replace(/#\{([^}]+)\}/g, (m, id) => lineage.get(id) || m).replace(/#(\d+)\b/g, (m, id) => lineage.get(id) || m);
+  for (const c of components) {
+    for (const p of [...c.inputs, ...c.outputs]) for (const col of [...p.columns]) {
+      if (!col.name && col.lineageId) col.name = lineage.get(col.lineageId) || "";
+      const fe = col.props.find(x => x.name === "FriendlyExpression"), ex = col.props.find(x => x.name === "Expression");
+      col.expression = fe ? fe.value : ex ? friendly(ex.value) : "";
+    }
+    for (const o of c.outputs) if (o.expression) o.expression = friendly(o.expression);
+  }
+  const paths = [];
+  for (const pe of kids(kid(pipeEl, "paths"), "path")) {
+    const s = ports.get(pe.getAttribute("startId")), e = ports.get(pe.getAttribute("endId"));
+    if (!s || !e) continue;
+    paths.push({ kind: "path", dft, id: pe.getAttribute("refId") || pe.getAttribute("id"), name: pe.getAttribute("name") || s.port.name,
+      from: s.comp.id, to: e.comp.id, fromComp: s.comp, toComp: e.comp, out: s.port, inp: e.port, isError: s.port.isError });
+  }
+  dft.pipeline = { components, paths, byId: new Map(components.map(c => [c.id, c])) };
+}
+
+/* =====================================================================
+   Layered graph layout (Sugiyama-style, top-to-bottom)
+   ===================================================================== */
+function layered(items, edgesIn, { rankSep = 56, nodeSep = 28 } = {}) {
+  const V = new Map(items.map(it => [it.id, { id: it.id, w: it.w, h: it.h, dummy: false }]));
+  const E = edgesIn.filter(e => V.has(e.from) && V.has(e.to) && e.from !== e.to);
+  // 1. Break cycles (DFS back-edges reversed)
+  const adj = new Map([...V.keys()].map(k => [k, []]));
+  E.forEach((e, i) => adj.get(e.from).push(i));
+  const st = new Map(), rev = new Set();
+  const dfs = u => { st.set(u, 1); for (const i of adj.get(u)) { const v = E[i].to; if (st.get(v) === 1) rev.add(i); else if (!st.get(v)) dfs(v); } st.set(u, 2); };
+  for (const k of V.keys()) if (!st.get(k)) dfs(k);
+  const DE = E.map((e, i) => rev.has(i) ? { s: e.to, t: e.from, e, rev: true } : { s: e.from, t: e.to, e, rev: false });
+  // 2. Longest-path ranking
+  const indeg = new Map([...V.keys()].map(k => [k, 0])), succ = new Map([...V.keys()].map(k => [k, []])), pred = new Map([...V.keys()].map(k => [k, []]));
+  DE.forEach(d => { indeg.set(d.t, indeg.get(d.t) + 1); succ.get(d.s).push(d); pred.get(d.t).push(d); });
+  const rank = new Map(), topo = [];
+  const q = [...V.keys()].filter(k => !indeg.get(k)); q.forEach(k => rank.set(k, 0));
+  while (q.length) {
+    const u = q.shift(); topo.push(u);
+    for (const d of succ.get(u)) { rank.set(d.t, Math.max(rank.get(d.t) || 0, rank.get(u) + 1)); indeg.set(d.t, indeg.get(d.t) - 1); if (!indeg.get(d.t)) q.push(d.t); }
+  }
+  // Pull pure sources down next to their first consumer
+  for (let i = topo.length - 1; i >= 0; i--) {
+    const u = topo[i];
+    if (!pred.get(u).length && succ.get(u).length) rank.set(u, Math.min(...succ.get(u).map(d => rank.get(d.t))) - 1);
+  }
+  V.forEach((v, k) => v.rank = rank.get(k) || 0);
+  // 3. Dummy nodes for long edges
+  let dc = 0;
+  const chains = DE.map(d => {
+    const ch = [d.s];
+    for (let r = V.get(d.s).rank + 1; r < V.get(d.t).rank; r++) { const id = `\u0000d${dc++}`; V.set(id, { id, w: 10, h: 0, rank: r, dummy: true }); ch.push(id); }
+    ch.push(d.t); return ch;
+  });
+  const up = new Map([...V.keys()].map(k => [k, []])), down = new Map([...V.keys()].map(k => [k, []]));
+  chains.forEach(ch => { for (let i = 0; i < ch.length - 1; i++) { down.get(ch[i]).push(ch[i + 1]); up.get(ch[i + 1]).push(ch[i]); } });
+  const maxRank = Math.max(0, ...[...V.values()].map(v => v.rank));
+  const layers = Array.from({ length: maxRank + 1 }, () => []);
+  const seen = new Set();
+  const place = id => { if (seen.has(id)) return; seen.add(id); layers[V.get(id).rank].push(id); down.get(id).forEach(place); };
+  items.forEach(it => { if (!up.get(it.id).length) place(it.id); });
+  [...V.keys()].forEach(place);
+  // 4. Crossing reduction (barycenter sweeps)
+  const idx = new Map();
+  const reindex = L => L.forEach((id, i) => idx.set(id, i));
+  layers.forEach(reindex);
+  for (let it = 0; it < 12; it++) {
+    const downward = it % 2 === 0;
+    const order = downward ? layers.map((_, i) => i).slice(1) : layers.map((_, i) => i).reverse().slice(1);
+    for (const r of order) {
+      const L = layers[r], nb = downward ? up : down;
+      const bary = new Map(L.map(id => { const ns = nb.get(id); return [id, ns.length ? ns.reduce((s, x) => s + idx.get(x), 0) / ns.length : idx.get(id)]; }));
+      L.sort((a, b) => bary.get(a) - bary.get(b));
+      reindex(L);
+    }
+  }
+  // 5. X coordinates: iterative balancing with order-preserving packing
+  const X = new Map();
+  const sep = (a, b) => (V.get(a).w + V.get(b).w) / 2 + (V.get(a).dummy || V.get(b).dummy ? nodeSep / 2 : nodeSep);
+  layers.forEach(L => { let x = 0; L.forEach((id, i) => { if (i) x += sep(L[i - 1], id); X.set(id, x); }); L.forEach(id => X.set(id, X.get(id) - x / 2)); });
+  const pack = (L, desired) => {
+    const blocks = [];
+    for (let i = 0; i < L.length; i++) {
+      let b = { idx: [i], offs: [0], p: desired[i] };
+      while (blocks.length) {
+        const a = blocks[blocks.length - 1], last = a.idx[a.idx.length - 1], gap = sep(L[last], L[i]);
+        if (a.p + a.offs[a.offs.length - 1] + gap <= b.p + b.offs[0]) break;
+        blocks.pop();
+        const base = a.offs[a.offs.length - 1] + gap - b.offs[0];
+        const m = { idx: a.idx.concat(b.idx), offs: a.offs.concat(b.offs.map(o => o + base)) };
+        m.p = m.idx.reduce((s, j, k) => s + desired[j] - m.offs[k], 0) / m.idx.length;
+        b = m;
+      }
+      blocks.push(b);
+    }
+    blocks.forEach(b => b.idx.forEach((j, k) => X.set(L[j], b.p + b.offs[k])));
+  };
+  for (let it = 0; it < 8; it++) {
+    const downward = it % 2 === 0;
+    const order = downward ? layers.map((_, i) => i) : layers.map((_, i) => i).reverse();
+    for (const r of order) {
+      const L = layers[r], nb = downward ? up : down;
+      pack(L, L.map(id => { const ns = nb.get(id); return ns.length ? ns.reduce((s, x) => s + X.get(x), 0) / ns.length : X.get(id); }));
+    }
+  }
+  // 6. Y coordinates
+  const layerH = layers.map(L => Math.max(0, ...L.map(id => V.get(id).h)));
+  const layerY = []; let y = 0;
+  layerH.forEach((h, r) => { layerY[r] = y; y += h + rankSep; });
+  let minX = Infinity, maxX = -Infinity;
+  V.forEach((v, k) => { minX = Math.min(minX, X.get(k) - v.w / 2); maxX = Math.max(maxX, X.get(k) + v.w / 2); });
+  const pos = new Map();
+  for (const it of items) {
+    const v = V.get(it.id);
+    pos.set(it.id, { x: X.get(it.id) - v.w / 2 - minX, y: layerY[v.rank] + (layerH[v.rank] - v.h) / 2, w: v.w, h: v.h });
+  }
+  // 7. Edge routes with spread ports
+  const portX = new Map();
+  const spread = (id, list, key) => {
+    const v = V.get(id); if (v.dummy) return;
+    list.sort((a, b) => a.x - b.x);
+    const step = Math.min(18, (v.w * 0.6) / Math.max(1, list.length));
+    list.forEach((e, i) => portX.set(e.key + key, X.get(id) - minX + (i - (list.length - 1) / 2) * step));
+  };
+  const outs = new Map(), ins = new Map();
+  chains.forEach((ch, ci) => {
+    const a = ch[0], b = ch[ch.length - 1];
+    (outs.get(a) || outs.set(a, []).get(a)).push({ key: ci, x: X.get(ch[1]) });
+    (ins.get(b) || ins.set(b, []).get(b)).push({ key: ci, x: X.get(ch[ch.length - 2]) });
+  });
+  outs.forEach((l, id) => spread(id, l, "o")); ins.forEach((l, id) => spread(id, l, "i"));
+  const edges = chains.map((ch, ci) => {
+    const s = V.get(ch[0]), t = V.get(ch[ch.length - 1]);
+    const pts = [{ x: portX.get(ci + "o"), y: layerY[s.rank] + (layerH[s.rank] + s.h) / 2 }];
+    for (let i = 1; i < ch.length - 1; i++) { const r = V.get(ch[i]).rank; pts.push({ x: X.get(ch[i]) - minX, y: layerY[r] + layerH[r] / 2 }); }
+    pts.push({ x: portX.get(ci + "i"), y: layerY[t.rank] + (layerH[t.rank] - t.h) / 2 });
+    if (DE[ci].rev) pts.reverse();
+    return { data: DE[ci].e.data, points: pts };
+  });
+  return { w: Math.max(0, maxX - minX), h: Math.max(0, y - rankSep), items, pos, edges };
+}
+
+/* =====================================================================
+   State
+   ===================================================================== */
+const S = { pkgs: [], pi: -1, view: null, sel: null, T: { x: 0, y: 0, k: 1 }, collapsed: new Set(), lastDf: {}, lastEh: {}, size: { w: 0, h: 0 } };
+const cur = () => S.pkgs[S.pi];
+let boxes = new Map(), edgeList = [];
+const svg = $("#canvas"), vp = $("#vp");
+
+/* =====================================================================
+   Rendering (SVG)
+   ===================================================================== */
+const TASK_W = 230, TASK_H = 48, PAD = 18, HEAD = 36;
+const fit = (s, px, fs = 12) => { const n = Math.floor(px / (fs * 0.58)); s = String(s); return s.length > n ? s.slice(0, Math.max(1, n - 1)) + "…" : s; };
+const collapsedKey = id => `${S.pi}|${id}`;
+
+function layoutCF(scope) {
+  const items = scope.children.map(ch => {
+    if (ch.kind === "container" && !S.collapsed.has(collapsedKey(ch.id))) {
+      const sub = layoutCF(ch);
+      return { id: ch.id, node: ch, sub, w: Math.max(TASK_W, sub.w + 2 * PAD), h: HEAD + sub.h + PAD };
+    }
+    return { id: ch.id, node: ch, w: TASK_W, h: ch.kind === "container" ? HEAD + 4 : TASK_H };
+  });
+  if (!items.length) return { w: 160, h: 26, items: [], edges: [], pos: new Map(), empty: true };
+  return layered(items, scope.constraints.map(c => ({ from: c.from, to: c.to, data: c })), { rankSep: 54, nodeSep: 30 });
+}
+
+function badgeSVG(x, y, w, h, txt, color, fs = 10) {
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="5" fill="${color}"/>` +
+         `<text x="${x + w / 2}" y="${y + h / 2 + fs * 0.36}" text-anchor="middle" class="bt" style="font-size:${fs}px">${esc(txt)}</text>`;
+}
+
+function nodeSVG(id, x, y, w, h, title, sub, meta, extraCls, stripe) {
+  let s = `<g class="node ${extraCls}" data-id="${esc(id)}" data-name="${esc(title.toLowerCase())}" transform="translate(${x},${y})">` +
+          `<title>${esc(title)}\n${esc(sub)}</title><rect class="box" width="${w}" height="${h}" rx="8"/>`;
+  if (stripe) s += `<path d="M8,0 H4 a4,4 0 0 0 -4,4 V${h - 4} a4,4 0 0 0 4,4 H8 Z" transform="translate(0,0)" fill="${stripe}" class="stripe"/>`;
+  s += badgeSVG(12, h / 2 - 13, 34, 26, meta.badge, meta.color || stripe, meta.badge.length > 3 ? 9 : 10);
+  s += `<text x="56" y="${h / 2 - 3}" class="nm">${esc(fit(title, w - 66, 12.5))}</text>`;
+  s += `<text x="56" y="${h / 2 + 12}" class="st">${esc(fit(sub, w - 66, 10.5))}</text></g>`;
+  return s;
+}
+
+function edgePath(pts) {
+  let d = `M${pts[0].x},${pts[0].y}`;
+  for (let i = 1; i < pts.length; i++) { const a = pts[i - 1], b = pts[i], my = (a.y + b.y) / 2; d += ` C${a.x},${my} ${b.x},${my} ${b.x},${b.y}`; }
+  return d;
+}
+function midPoint(pts) { const n = pts.length; return n % 2 ? pts[(n - 1) / 2] : { x: (pts[n / 2 - 1].x + pts[n / 2].x) / 2, y: (pts[n / 2 - 1].y + pts[n / 2].y) / 2 }; }
+
+function edgeSVG(points, cls, marker, data, label) {
+  const i = edgeList.push(data) - 1, d = edgePath(points);
+  let s = `<g class="edge ${cls}" data-edge="${i}"><path class="hit" d="${d}"/><path class="ln" d="${d}" marker-end="url(#${marker})"/>`;
+  if (label) {
+    const m = midPoint(points.slice(0, 2)), w = Math.max(22, label.length * 6.2 + 12);
+    s += `<g transform="translate(${m.x},${m.y})"><rect x="${-w / 2}" y="-9" width="${w}" height="18" rx="9" class="lbl"/><text y="3.5" text-anchor="middle" class="lt">${esc(label)}</text></g>`;
+  }
+  return s + "</g>";
+}
+
+function drawCF(L, ax, ay, out) {
+  out.push(`<g transform="translate(${ax},${ay})">`);
+  for (const it of L.items) {
+    const p = L.pos.get(it.id), n = it.node;
+    boxes.set(it.id, { x: ax + p.x, y: ay + p.y, w: p.w, h: p.h });
+    const dis = n.disabled ? " disabled" : "";
+    if (n.kind === "container") {
+      const collapsed = !it.sub;
+      out.push(`<g class="node container${dis}" data-id="${esc(n.id)}" data-name="${esc(n.name.toLowerCase())}" transform="translate(${p.x},${p.y})">` +
+        `<title>${esc(n.name)}\n${esc(n.meta.label)}${collapsed ? " (collapsed – double-click to expand)" : ""}</title>` +
+        `<rect class="cbox" width="${p.w}" height="${p.h}" rx="10"/>` +
+        `<path class="chead" d="M0,10 a10,10 0 0 1 10,-10 H${p.w - 10} a10,10 0 0 1 10,10 V${HEAD} H0 Z"${collapsed ? ` transform="scale(1,${(p.h) / HEAD})"` : ""}/>` +
+        `<text x="14" y="${HEAD / 2 + 4}" class="tog" data-toggle="${esc(n.id)}">${collapsed ? "▸" : "▾"}</text>` +
+        badgeSVG(30, HEAD / 2 - 9, 34, 18, n.meta.badge, n.meta.color, 9) +
+        `<text x="72" y="${HEAD / 2 + 4.5}" class="nm">${esc(fit(n.name, p.w - 150, 12.5))}</text>` +
+        `<text x="${p.w - 12}" y="${HEAD / 2 + 4}" text-anchor="end" class="st">${esc(n.meta.label.replace(" Container", ""))}</text></g>`);
+      if (it.sub) {
+        if (it.sub.empty) out.push(`<text x="${p.x + p.w / 2}" y="${p.y + HEAD + 16}" text-anchor="middle" class="st">(empty)</text>`);
+        else drawCF(it.sub, ax + p.x + (p.w - it.sub.w) / 2, ay + p.y + HEAD, out);
+      }
+    } else {
+      const sub = n.kind === "dataflow" ? `${n.meta.label} · ${n.pipeline.components.length} components` : n.meta.label;
+      out.push(nodeSVG(n.id, p.x, p.y, p.w, p.h, n.name, sub, n.meta, `task${dis}${n.kind === "dataflow" ? " dft" : ""}`));
+    }
+  }
+  for (const e of L.edges) {
+    const c = e.data, cls = ["ok", "fail", "done"][c.value] || "ok";
+    const hasExpr = c.expression && c.evalOp !== 2;
+    out.push(edgeSVG(e.points, `pc ${cls}${c.logicalAnd ? "" : " or"}`, `ar-${cls}`, c, hasExpr ? "fx" : ""));
+  }
+  out.push("</g>");
+}
+
+function drawDF(dft, out) {
+  const { components, paths } = dft.pipeline;
+  const L = layered(components.map(c => ({ id: c.id, w: TASK_W, h: TASK_H, comp: c })), paths.map(p => ({ from: p.from, to: p.to, data: p })), { rankSep: 64, nodeSep: 32 });
+  for (const it of L.items) {
+    const p = L.pos.get(it.id), c = it.comp;
+    boxes.set(c.id, { x: p.x, y: p.y, w: p.w, h: p.h });
+    out.push(nodeSVG(c.id, p.x, p.y, p.w, p.h, c.name, c.meta.label, { badge: c.meta.badge, color: CAT_COLORS[c.cat] }, `comp ${c.cat}`, CAT_COLORS[c.cat]));
+  }
+  for (const e of L.edges) {
+    const pth = e.data, multi = pth.fromComp.outputs.filter(o => !o.isError).length > 1;
+    const label = pth.isError ? "error" : multi ? fit(pth.out.name.replace(/^(Conditional Split|Lookup) /, ""), 150, 10.5) : "";
+    out.push(edgeSVG(e.points, `dfp${pth.isError ? " err" : ""}`, pth.isError ? "ar-fail" : "ar-df", pth, label));
+  }
+  return L;
+}
+
+const SVG_STYLE = `
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .node .box { fill: #fff; stroke: #cfd5dd; stroke-width: 1; filter: drop-shadow(0 1px 1.5px rgba(16,24,40,.08)); }
+  .node { cursor: pointer; }
+  .node:hover .box, .node:hover .cbox { stroke: #8fa3bd; }
+  .node.sel .box, .node.sel .cbox { stroke: #2b6cd4; stroke-width: 2.5; }
+  .node.match .box, .node.match .cbox { stroke: #f59e0b; stroke-width: 2.5; }
+  .node.dim { opacity: .35; }
+  .node.disabled { opacity: .5; }
+  .node.disabled .nm { text-decoration: line-through; }
+  .nm { font-size: 12.5px; font-weight: 600; fill: #1f2933; }
+  .st { font-size: 10.5px; fill: #6b7785; }
+  .bt { fill: #fff; font-weight: 700; }
+  .cbox { fill: rgba(241,243,246,.75); stroke: #b9c1cc; stroke-width: 1; stroke-dasharray: 0; }
+  .chead { fill: #e7eaef; }
+  .tog { font-size: 12px; fill: #6b7785; cursor: pointer; }
+  .edge { cursor: pointer; }
+  .edge .hit { stroke: transparent; stroke-width: 12; fill: none; }
+  .edge .ln { fill: none; stroke-width: 2; }
+  .edge:hover .ln { stroke-width: 3; }
+  .edge.sel .ln { stroke-width: 3.5; }
+  .pc.ok .ln { stroke: #2e9e44; } .pc.fail .ln { stroke: #d13438; } .pc.done .ln { stroke: #2b6cd4; }
+  .pc.or .ln { stroke-dasharray: 6 4; }
+  .dfp .ln { stroke: #5b6b7f; } .dfp.err .ln { stroke: #d13438; stroke-dasharray: 5 3; }
+  .lbl { fill: #fff; stroke: #cfd5dd; }
+  .lt { font-size: 10.5px; fill: #3f4b59; font-weight: 600; }
+`;
+const MARKERS = [["ar-ok", "#2e9e44"], ["ar-fail", "#d13438"], ["ar-done", "#2b6cd4"], ["ar-df", "#5b6b7f"]]
+  .map(([id, c]) => `<marker id="${id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${c}"/></marker>`).join("");
+
+function renderView(doFit) {
+  const pkg = cur(); if (!pkg || !S.view) return;
+  boxes = new Map(); edgeList = [];
+  const out = [`<defs><style>${SVG_STYLE}</style>${MARKERS}</defs>`];
+  let L, msg = "";
+  if (S.view.kind === "df") {
+    const dft = pkg.nodes.get(S.view.id);
+    L = drawDF(dft, out);
+    if (!dft.pipeline.components.length) msg = "This data flow has no components.";
+  } else {
+    const scope = pkg.nodes.get(S.view.id);
+    L = layoutCF(scope);
+    if (L.empty) msg = S.view.kind === "eh" ? "This event handler is empty." : "This package has no tasks.";
+    else drawCF(L, 0, 0, out);
+  }
+  vp.innerHTML = out.join("");
+  S.size = { w: L.w, h: L.h };
+  $("#stageMsg").hidden = !msg; $("#stageMsg").textContent = msg;
+  renderTabs(); renderLegend(); applySel(); applySearch();
+  if (doFit) fitView(); else applyT();
+}
+
+function renderLegend() {
+  $("#legend").innerHTML = S.view.kind === "df"
+    ? `<span><i style="border-color:${CAT_COLORS.source}"></i>Source</span><span><i style="border-color:${CAT_COLORS.transform}"></i>Transform</span><span><i style="border-color:${CAT_COLORS.dest}"></i>Destination</span><span><i style="border-color:#d13438;border-top-style:dashed"></i>Error output</span>`
+    : `<span><i style="border-color:var(--ok)"></i>Success</span><span><i style="border-color:var(--fail)"></i>Failure</span><span><i style="border-color:var(--done)"></i>Completion</span><span><i style="border-color:#888;border-top-style:dashed"></i>OR constraint</span><span><b>fx</b> expression</span>`;
+}
+
+/* Pan & zoom ---------------------------------------------------------- */
+function applyT() { vp.setAttribute("transform", `translate(${S.T.x},${S.T.y}) scale(${S.T.k})`); }
+function fitView() {
+  const r = svg.getBoundingClientRect(), m = 40;
+  const k = Math.min(1.2, (r.width - 2 * m) / Math.max(1, S.size.w), (r.height - 2 * m) / Math.max(1, S.size.h));
+  S.T = { k: Math.max(0.1, k), x: (r.width - S.size.w * Math.max(0.1, k)) / 2, y: Math.max(m, (r.height - S.size.h * Math.max(0.1, k)) / 2) };
+  applyT();
+}
+function zoomAt(f, cx, cy) {
+  const k = Math.min(4, Math.max(0.08, S.T.k * f)); f = k / S.T.k;
+  S.T.x = cx - (cx - S.T.x) * f; S.T.y = cy - (cy - S.T.y) * f; S.T.k = k; applyT();
+}
+function centerOn(id) {
+  const b = boxes.get(id); if (!b) return;
+  const r = svg.getBoundingClientRect();
+  if (S.T.k < 0.6) S.T.k = 0.9;
+  S.T.x = r.width / 2 - (b.x + b.w / 2) * S.T.k; S.T.y = r.height / 2 - (b.y + b.h / 2) * S.T.k; applyT();
+}
+svg.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = svg.getBoundingClientRect();
+  if (e.ctrlKey || e.metaKey) zoomAt(Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
+  else { S.T.x -= e.deltaX; S.T.y -= e.deltaY; applyT(); }
+}, { passive: false });
+let drag = null;
+svg.addEventListener("pointerdown", e => { if (e.button !== 0) return; drag = { x: e.clientX, y: e.clientY, tx: S.T.x, ty: S.T.y, moved: false }; });
+window.addEventListener("pointermove", e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (!drag.moved && Math.hypot(dx, dy) > 3) { drag.moved = true; svg.classList.add("panning"); }
+  if (drag.moved) { S.T.x = drag.tx + dx; S.T.y = drag.ty + dy; applyT(); }
+});
+window.addEventListener("pointerup", () => { setTimeout(() => { drag = null; }, 0); svg.classList.remove("panning"); });
+$("#zIn").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(1.25, r.width / 2, r.height / 2); };
+$("#zOut").onclick = () => { const r = svg.getBoundingClientRect(); zoomAt(0.8, r.width / 2, r.height / 2); };
+$("#zFit").onclick = fitView;
+
+svg.addEventListener("click", e => {
+  if (drag && drag.moved) return;
+  const pkg = cur(); if (!pkg) return;
+  const tog = e.target.closest("[data-toggle]");
+  if (tog) { toggleCollapse(tog.dataset.toggle); return; }
+  const ed = e.target.closest("[data-edge]");
+  if (ed) { const d = edgeList[+ed.dataset.edge]; select(d.kind === "path" ? { t: "path", obj: d } : { t: "cons", obj: d }); return; }
+  const nd = e.target.closest("[data-id]");
+  if (nd) {
+    select(S.view.kind === "df" ? { t: "comp", dft: S.view.id, id: nd.dataset.id } : { t: "exec", id: nd.dataset.id });
+    return;
+  }
+  select(S.view.kind === "df" ? { t: "exec", id: S.view.id } : S.view.kind === "eh" ? { t: "exec", id: S.view.id } : { t: "pkg" }, false);
+});
+svg.addEventListener("dblclick", e => {
+  const nd = e.target.closest("[data-id]"); if (!nd || S.view.kind === "df") return;
+  const n = cur().nodes.get(nd.dataset.id);
+  if (n && n.kind === "dataflow") openView({ kind: "df", id: n.id }, true);
+  else if (n && n.kind === "container") toggleCollapse(n.id);
+});
+function toggleCollapse(id) {
+  const k = collapsedKey(id);
+  S.collapsed.has(k) ? S.collapsed.delete(k) : S.collapsed.add(k);
+  renderView(false);
+}
+
+/* =====================================================================
+   Views, tabs, selection
+   ===================================================================== */
+function openView(view, doFit = true) {
+  const pkg = cur();
+  S.view = view;
+  if (view.kind === "df") S.lastDf[S.pi] = view.id;
+  if (view.kind === "eh") S.lastEh[S.pi] = view.id;
+  renderView(doFit);
+}
+function renderTabs() {
+  const pkg = cur(), k = S.view.kind;
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === k));
+  document.querySelector('.tab[data-tab="df"]').disabled = !pkg.dataflows.length;
+  document.querySelector('.tab[data-tab="eh"]').disabled = !pkg.eventHandlers.length;
+  const dfSel = $("#dfSel"), ehSel = $("#ehSel");
+  dfSel.hidden = k !== "df"; ehSel.hidden = k !== "eh";
+  if (k === "df") dfSel.innerHTML = pkg.dataflows.map(d => `<option value="${esc(d.id)}"${d.id === S.view.id ? " selected" : ""}>${esc(pathLabel(d))}</option>`).join("");
+  if (k === "eh") ehSel.innerHTML = pkg.eventHandlers.map(h => `<option value="${esc(h.id)}"${h.id === S.view.id ? " selected" : ""}>${esc(h.owner.name)} › ${esc(h.name)}</option>`).join("");
+}
+function pathLabel(n) { const parts = []; for (let x = n; x && x.kind !== "package"; x = x.parent) parts.unshift(x.kind === "eventhandler" ? `${x.name}` : x.name); return parts.join(" › "); }
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => {
+  const pkg = cur(); if (!pkg) return;
+  if (b.dataset.tab === "cf") openView({ kind: "cf", id: pkg.root.id });
+  if (b.dataset.tab === "df" && pkg.dataflows.length) openView({ kind: "df", id: S.lastDf[S.pi] || pkg.dataflows[0].id });
+  if (b.dataset.tab === "eh" && pkg.eventHandlers.length) openView({ kind: "eh", id: S.lastEh[S.pi] || pkg.eventHandlers[0].id });
+});
+$("#dfSel").onchange = e => openView({ kind: "df", id: e.target.value });
+$("#ehSel").onchange = e => openView({ kind: "eh", id: e.target.value });
+
+/** Navigate to an object: switch view if needed, select, centre. */
+function nav(t) {
+  const pkg = cur(); if (!pkg) return;
+  if (t.t === "openDf") { openView({ kind: "df", id: t.id }); return; }
+  if (t.t === "pkgfile") { const i = S.pkgs.findIndex(p => p.fileName.toLowerCase() === t.name.toLowerCase()); if (i >= 0) switchPkg(i); return; }
+  if (t.t === "exec") {
+    const n = pkg.nodes.get(t.id); if (!n) return;
+    if (n.kind === "package") { openView({ kind: "cf", id: n.id }); select({ t: "pkg" }); return; }
+    if (n.kind === "eventhandler") { openView({ kind: "eh", id: n.id }); select(t); return; }
+    for (let p = n.parent; p; p = p.parent) S.collapsed.delete(collapsedKey(p.id));
+    const scope = n.scopeRoot;
+    const want = scope.kind === "eventhandler" ? { kind: "eh", id: scope.id } : { kind: "cf", id: pkg.root.id };
+    if (!S.view || S.view.kind !== want.kind || S.view.id !== want.id) openView(want, false); else renderView(false);
+    select(t); centerOn(n.id); return;
+  }
+  if (t.t === "comp") {
+    if (!S.view || S.view.kind !== "df" || S.view.id !== t.dft) openView({ kind: "df", id: t.dft }, false);
+    select(t); centerOn(t.id); return;
+  }
+  select(t);
+}
+
+function select(t, syncTree = true) {
+  S.sel = t; applySel(); renderDetails();
+}
+function selKey(t) {
+  if (!t) return "";
+  if (t.t === "exec") return "exec:" + t.id;
+  if (t.t === "comp") return "comp:" + t.id;
+  if (t.t === "conn") return "conn:" + t.key;
+  if (t.t === "var") return "var:" + t.key;
+  if (t.t === "param") return "param:" + t.key;
+  if (t.t === "pkg") return "pkg";
+  return "";
+}
+function applySel() {
+  const t = S.sel;
+  vp.querySelectorAll(".node.sel, .edge.sel").forEach(n => n.classList.remove("sel"));
+  if (t && (t.t === "exec" || t.t === "comp")) vp.querySelectorAll("[data-id]").forEach(n => { if (n.dataset.id === t.id) n.classList.add("sel"); });
+  if (t && (t.t === "cons" || t.t === "path")) vp.querySelectorAll("[data-edge]").forEach(n => { if (edgeList[+n.dataset.edge] === t.obj) n.classList.add("sel"); });
+  const k = selKey(t);
+  document.querySelectorAll("#side .ti").forEach(el => el.classList.toggle("sel", !!k && el.dataset.key === k));
+}
+
+/* =====================================================================
+   Sidebar
+   ===================================================================== */
+const navAttr = o => `data-nav="${esc(JSON.stringify(o))}"`;
+function treeItem(key, navObj, badge, color, name, extra, childrenHtml, cls = "") {
+  return `<li><div class="ti ${cls}" data-key="${esc(key)}" ${navAttr(navObj)} data-name="${esc(String(name).toLowerCase())}">` +
+         `<span class="car"${childrenHtml ? " data-car" : ""}>${childrenHtml ? "▾" : ""}</span>` +
+         (badge ? `<span class="tb" style="background:${color}">${esc(badge)}</span>` : "") +
+         `<span class="tn" title="${esc(name)}">${esc(name)}</span>${extra ? `<span class="tx">${esc(extra)}</span>` : ""}</div>` +
+         (childrenHtml ? `<ul>${childrenHtml}</ul>` : "") + "</li>";
+}
+function treeExec(n) {
+  let kidsHtml = n.children.map(treeExec).join("");
+  if (n.pipeline) kidsHtml += n.pipeline.components.map(c => treeItem("comp:" + c.id, { t: "comp", dft: n.id, id: c.id }, c.meta.badge, CAT_COLORS[c.cat], c.name, "", "")).join("");
+  return treeItem("exec:" + n.id, { t: "exec", id: n.id }, n.meta.badge, n.meta.color, n.name, "", kidsHtml, n.disabled ? "disabled" : "");
+}
+function group(title, count, body, open = true) {
+  return `<details class="group"${open ? " open" : ""}><summary><span class="lbl">${esc(title)}</span><span class="cnt">${count}</span></summary><ul class="tree">${body}</ul></details>`;
+}
+function renderSide() {
+  const pkg = cur();
+  const root = pkg.root;
+  let h = `<ul class="tree" style="padding-top:8px">${treeItem("pkg", { t: "pkg" }, "PKG", "#1f2933", pkg.name, "", "")}</ul>`;
+  h += group("Control Flow", countExecs(root), root.children.map(treeExec).join("") || `<li class="muted" style="padding:4px 14px">No tasks</li>`);
+  if (pkg.eventHandlers.length)
+    h += group("Event Handlers", pkg.eventHandlers.length, pkg.eventHandlers.map(eh => treeItem("exec:" + eh.id, { t: "exec", id: eh.id }, "EVT", "#b45309", `${eh.owner.name} › ${eh.name}`, "", eh.children.map(treeExec).join(""))).join(""));
+  h += group("Connection Managers", pkg.connections.length, pkg.connections.map(c => treeItem("conn:" + (c.dtsid || c.name), { t: "conn", key: c.dtsid || c.name }, connBadge(c.type), "#0e7490", c.name, "", "")).join(""));
+  if (pkg.parameters.length) h += group("Parameters", pkg.parameters.length, pkg.parameters.map(p => treeItem("param:" + p.name, { t: "param", key: p.name }, "$", "#7c3aed", p.name, p.dtype, "")).join(""));
+  const vars = pkg.variables.filter(v => v.ns !== "System");
+  h += group("Variables", vars.length, vars.map(v => treeItem("var:" + v.key, { t: "var", key: v.key }, "@", "#b4237a", `${v.ns}::${v.name}`, v.scope.kind === "package" ? v.dtype : `${v.scope.name}`, "")).join(""), vars.length < 40);
+  $("#side").innerHTML = h;
+  applySel();
+}
+const countExecs = n => n.children.reduce((s, c) => s + 1 + countExecs(c), 0);
+const connBadge = t => ({ OLEDB: "OLE", "ADO.NET": "ADO", FLATFILE: "FLAT", FILE: "FILE", EXCEL: "XLS", SMTP: "SMTP", ODBC: "ODBC", MULTIFILE: "FILES", HTTP: "HTTP", FTP: "FTP" }[String(t).split(":")[0].toUpperCase()] || String(t).slice(0, 4).toUpperCase() || "CM");
+
+$("#side").addEventListener("click", e => {
+  const car = e.target.closest("[data-car]");
+  if (car) { const li = car.closest("li"); li.classList.toggle("closed"); car.textContent = li.classList.contains("closed") ? "▸" : "▾"; return; }
+});
+document.addEventListener("click", e => {
+  const a = e.target.closest("[data-nav]"); if (!a || e.target.closest("[data-car]")) return;
+  e.preventDefault(); nav(JSON.parse(a.dataset.nav));
+});
+
+/* Search ---------------------------------------------------------------- */
+function applySearch() {
+  const q = $("#search").value.trim().toLowerCase();
+  vp.querySelectorAll(".node").forEach(n => {
+    const hit = q && n.dataset.name.includes(q);
+    n.classList.toggle("match", !!hit);
+    n.classList.toggle("dim", !!q && !hit && !n.classList.contains("container"));
+  });
+  const filterLi = li => {
+    const ti = li.querySelector(":scope > .ti"); const sub = li.querySelector(":scope > ul");
+    let any = false;
+    if (sub) for (const c of sub.children) if (c.tagName === "LI" && filterLi(c)) any = true;
+    const self = !q || (ti && ti.dataset.name && ti.dataset.name.includes(q));
+    li.classList.toggle("hidden", !(self || any));
+    return self || any;
+  };
+  document.querySelectorAll("#side ul.tree > li").forEach(filterLi);
+}
+$("#search").addEventListener("input", applySearch);
+$("#search").addEventListener("keydown", e => {
+  if (e.key === "Enter") { const m = vp.querySelector(".node.match"); if (m) { centerOn(m.dataset.id); m.dispatchEvent(new MouseEvent("click", { bubbles: true })); } }
+  if (e.key === "Escape") { e.target.value = ""; applySearch(); }
+});
+
+/* =====================================================================
+   Details panel
+   ===================================================================== */
+const SQL_KW = new Set(("select from where insert into values update set delete merge using when matched then not and or on join left right inner outer full cross group by order having as case else end exec execute begin commit rollback transaction tran truncate table create alter drop declare if is null in exists distinct top union all with cast convert return procedure proc view index output over partition like between asc desc go print try catch raise raiserror throw nolock isnull coalesce count sum min max avg getdate").split(" "));
+function hlSQL(s) {
+  const re = /(--[^\n]*|\/\*[\s\S]*?\*\/)|('(?:[^']|'')*'?)|(@\w+|\?)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][\w]*)|([^\-\/'@?A-Za-z_0-9]+|[\s\S])/g;
+  let out = "", m;
+  while ((m = re.exec(s))) {
+    if (m[1]) out += `<span class="cmt">${esc(m[1])}</span>`;
+    else if (m[2]) out += `<span class="str">${esc(m[2])}</span>`;
+    else if (m[3]) out += `<span class="var">${esc(m[3])}</span>`;
+    else if (m[4]) out += `<span class="num">${esc(m[4])}</span>`;
+    else if (m[5]) out += SQL_KW.has(m[5].toLowerCase()) ? `<span class="kw">${esc(m[5])}</span>` : esc(m[5]);
+    else out += esc(m[6]);
+  }
+  return out;
+}
+const hlExpr = s => esc(s).replace(/(@\[[^\]]+\]|@\w+|\$\w+::\w+)/g, '<span class="var">$1</span>').replace(/(&quot;(?:[^&]|&(?!quot;))*&quot;)/g, '<span class="str">$1</span>');
+const code = (s, lang) => `<pre class="code">${lang === "sql" ? hlSQL(s) : lang === "expr" ? hlExpr(s) : esc(s)}</pre>`;
+const isSqlKey = k => /sql|statement|command|query/i.test(k);
+const isExprKey = k => /expression/i.test(k);
+
+function fmtVal(k, v) {
+  const pkg = cur(); v = String(v ?? "");
+  const conn = pkg.connByKey.get(v.trim());
+  if (conn && v.trim()) return `<a class="lnk" ${navAttr({ t: "conn", key: conn.dtsid || conn.name })}>${esc(conn.name)}</a>`;
+  if (/packagename$/i.test(k) && S.pkgs.some(p => p.fileName.toLowerCase() === v.toLowerCase())) return `<a class="lnk" ${navAttr({ t: "pkgfile", name: v })}>${esc(v)}</a> <span class="muted">(loaded)</span>`;
+  if (/connectionstring/i.test(k)) return code(maskSecrets(v));
+  if (v.includes("\n") || (isSqlKey(k) && v.length > 20)) return code(v, isSqlKey(k) ? "sql" : isExprKey(k) ? "expr" : "");
+  if (isExprKey(k) && v) return code(v, "expr");
+  return esc(v);
+}
+function kv(rows) {
+  rows = rows.filter(r => r && r[1] !== undefined && r[1] !== null && String(r[1]) !== "");
+  if (!rows.length) return "";
+  return `<table class="kv">${rows.map(([k, v, raw]) => `<tr><th>${esc(k)}</th><td>${raw ? v : fmtVal(k, v)}</td></tr>`).join("")}</table>`;
+}
+const sec = (title, body, open = true) => body ? `<details class="sec"${open ? " open" : ""}><summary>${esc(title)}</summary><div class="secb">${body}</div></details>` : "";
+const head = (badge, color, title, sub) => `<div class="dh"><span class="tb" style="background:${color}">${esc(badge)}</span><div><h2>${esc(title)}</h2><div class="sub">${esc(sub)}</div></div></div>`;
+const lnk = (o, text) => `<a class="lnk" ${navAttr(o)}>${esc(text)}</a>`;
+function grid(cols, rows) {
+  if (!rows.length) return "";
+  return `<table class="grid"><tr>${cols.map(c => `<th>${esc(c)}</th>`).join("")}</tr>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`;
+}
+const typeStr = c => esc(c.dataType + (c.length && c.length !== "0" ? `(${c.length})` : c.precision && c.precision !== "0" ? `(${c.precision},${c.scale || 0})` : ""));
+
+/** Generic dump of an ObjectData element into key/value rows. */
+function dump(el, prefix, rows, depth = 0) {
+  for (const [k, v] of attrsOf(el)) rows.push([prefix + k, v]);
+  for (const c of el.children) {
+    const name = prefix + c.localName;
+    if (!c.children.length) {
+      const at = attrsOf(c), txt = c.textContent.trim();
+      if (txt) rows.push([name, txt]);
+      at.forEach(([k, v]) => rows.push([at.length === 1 && !txt ? `${name}: ${k}` : `${name}.${k}`, v]));
+    } else if (depth < 4) dump(c, name + ".", rows, depth + 1);
+  }
+  return rows;
+}
+
+function usedBy(needles, selfObj) {
+  const pkg = cur();
+  needles = needles.filter(Boolean);
+  return pkg.users.filter(u => u.self !== selfObj && needles.some(n => u.text.includes(n)));
+}
+const usedByHtml = list => list.length ? `<ul class="links">${list.map(u => `<li>${lnk(u.nav, u.label)}</li>`).join("")}</ul>` : `<span class="muted">Not referenced.</span>`;
+
+function renderDetails() {
+  const t = S.sel, pkg = cur(), el = $("#details");
+  if (!t || !pkg) { el.innerHTML = `<div class="empty">Select a task, component, connection or variable to see its details.</div>`; return; }
+  let h = "";
+  try {
+    if (t.t === "pkg") h = detailsPackage(pkg);
+    else if (t.t === "exec") h = detailsExec(pkg.nodes.get(t.id));
+    else if (t.t === "comp") h = detailsComp(pkg.nodes.get(t.dft).pipeline.byId.get(t.id));
+    else if (t.t === "cons") h = detailsCons(t.obj);
+    else if (t.t === "path") h = detailsPath(t.obj);
+    else if (t.t === "conn") h = detailsConn(pkg.connections.find(c => (c.dtsid || c.name) === t.key));
+    else if (t.t === "var") h = detailsVar(pkg.variables.find(v => v.key === t.key));
+    else if (t.t === "param") h = detailsParam(pkg.parameters.find(p => p.name === t.key));
+  } catch (e) { h = `<div class="empty">Couldn't render details: ${esc(e.message)}</div>`; console.error(e); }
+  el.innerHTML = h; el.scrollTop = 0;
+}
+
+function detailsPackage(pkg) {
+  const r = pkg.root.el;
+  const rows = [["File", pkg.fileName], ["Description", pkg.root.description], ["Creator", A(r, "CreatorName")], ["Created", A(r, "CreationDate")],
+    ["Format version", A(r, "PackageFormatVersion")], ["Product version", A(r, "LastModifiedProductVersion")],
+    ["Version", [A(r, "VersionMajor"), A(r, "VersionMinor"), A(r, "VersionBuild")].filter(x => x != null).join(".")],
+    ["Protection level", A(r, "ProtectionLevel")], ["Max concurrent", A(r, "MaxConcurrentExecutables")]];
+  const stats = [["Tasks & containers", countExecs(pkg.root)], ["Data flows", pkg.dataflows.length],
+    ["Data flow components", pkg.dataflows.reduce((s, d) => s + d.pipeline.components.length, 0)], ["Event handlers", pkg.eventHandlers.length],
+    ["Connection managers", pkg.connections.length], ["Parameters", pkg.parameters.length], ["Variables", pkg.variables.filter(v => v.ns !== "System").length]];
+  return head("PKG", "#1f2933", pkg.name, "SSIS Package") + sec("General", kv(rows)) + sec("Summary", kv(stats)) +
+    sec("Property expressions", kv(kids(r, "PropertyExpression").map(p => [A(p, "Name"), p.textContent]))) +
+    sec("Annotations", pkg.annotations.map(a => code(a)).join("")) +
+    sec("All properties", kv(attrsOf(r).concat(kids(r, "Property").map(p => [A(p, "Name"), p.textContent]))), false);
+}
+
+function detailsExec(n) {
+  if (!n) return "";
+  if (n.kind === "package") return detailsPackage(cur());
+  const pkg = cur(), el = n.el;
+  let h = head(n.meta.badge, n.meta.color, n.name, n.kind === "eventhandler" ? `Event handler on ${n.owner.name}` : n.meta.label);
+  if (n.kind === "dataflow") h += `<div class="actions"><button class="btn primary" ${navAttr({ t: "openDf", id: n.id })}>Open data flow →</button> <span class="muted">${n.pipeline.components.length} components, ${n.pipeline.paths.length} paths</span></div>`;
+  h += sec("General", kv([["Path", pathLabel(n)], ["Description", n.description !== n.meta.label ? n.description : ""],
+    ["Disabled", n.disabled ? "Yes" : ""], ["Delay validation", truthy(A(el, "DelayValidation")) ? "Yes" : ""],
+    ["Transaction option", { 0: "NotSupported", 2: "Required" }[A(el, "TransactionOption")] || ""],
+    ["FailPackageOnFailure", truthy(A(el, "FailPackageOnFailure")) ? "True" : ""], ["MaxErrorCount", A(el, "MaxErrorCount")]]));
+
+  // Loop containers
+  if (/forloop/i.test(n.type)) h += sec("For Loop", kv([["InitExpression", A(el, "InitExpression")], ["EvalExpression", A(el, "EvalExpression")], ["AssignExpression", A(el, "AssignExpression")]]));
+  const fe = kid(el, "ForEachEnumerator");
+  if (fe) {
+    const odEl = kid(fe, "ObjectData");
+    const rows = [["Enumerator", (A(fe, "CreationName") || "").split(".").pop().replace(/^ForEach/, "").replace(/([a-z])([A-Z])/g, "$1 $2")]];
+    if (odEl) for (const c of odEl.children) dump(c, "", rows);
+    rows.push(...kids(fe, "PropertyExpression").map(p => [`${A(p, "Name")} (expression)`, p.textContent]));
+    h += sec("Enumerator", kv(rows));
+    const maps = kids(kid(el, "ForEachVariableMappings"), "ForEachVariableMapping");
+    if (maps.length) h += sec("Variable mappings", grid(["Index", "Variable"], maps.map(m => [esc(A(m, "ValueIndex")), `<span class="var">${esc(A(m, "VariableName"))}</span>`])));
+  }
+  // Task settings from ObjectData
+  const od = kid(el, "ObjectData");
+  if (od && n.kind === "task") {
+    for (const c of od.children) {
+      if (c.localName === "ScriptProject") {
+        h += sec("Script", kv(attrsOf(c).filter(([k]) => !/^(Name|VSTA.*)$/.test(k))));
+        for (const pi of kids(c, "ProjectItem").filter(p => /\.(cs|vb)$/i.test(p.getAttribute("Name") || "") && !/AssemblyInfo|Designer/i.test(p.getAttribute("Name"))))
+          h += sec(pi.getAttribute("Name"), code(pi.textContent.trim()), true);
+      } else {
+        const rows = dump(c, "", []);
+        // Put SQL / long text first
+        rows.sort((a, b) => (isSqlKey(b[0]) ? 1 : 0) - (isSqlKey(a[0]) ? 1 : 0));
+        h += sec("Task settings", kv(rows));
+      }
+    }
+  }
+  h += sec("Property expressions", kv(kids(el, "PropertyExpression").map(p => [A(p, "Name"), p.textContent])));
+  // Precedence
+  const scope = n.parent;
+  if (scope && n.kind !== "eventhandler") {
+    const ins = scope.constraints.filter(c => c.to === n.id), outs = scope.constraints.filter(c => c.from === n.id);
+    const row = (c, other) => `<li><span class="pill ${["ok", "fail", "done"][c.value]}">${PC_VALUE[c.value] || c.value}</span>${c.expression && c.evalOp !== 2 ? '<span class="pill">fx</span>' : ""}${lnk({ t: "exec", id: other }, cur().nodes.get(other)?.name || other)}</li>`;
+    const ph = (ins.length ? `<div class="muted">Runs after</div><ul class="links">${ins.map(c => row(c, c.from)).join("")}</ul>` : "") +
+               (outs.length ? `<div class="muted" style="margin-top:6px">Then</div><ul class="links">${outs.map(c => row(c, c.to)).join("")}</ul>` : "");
+    h += sec("Precedence", ph);
+  }
+  const vars = pkg.variables.filter(v => v.scope === n);
+  if (vars.length) h += sec("Variables in scope", vars.map(v => lnk({ t: "var", key: v.key }, `${v.ns}::${v.name}`)).join("<br>"));
+  if (n.eventHandlers.length) h += sec("Event handlers", n.eventHandlers.map(e => lnk({ t: "exec", id: e.id }, e.name)).join("<br>"));
+  if (n.kind === "eventhandler" || n.kind === "container") h += sec("Contains", n.children.length ? n.children.map(c => lnk({ t: "exec", id: c.id }, c.name)).join("<br>") : `<span class="muted">Nothing</span>`);
+  // Connections & variables referenced
+  const me = pkg.users.find(u => u.self === n);
+  if (me) {
+    const conns = pkg.connections.filter(c => [c.dtsid, c.refId].some(k => k && me.text.includes(k)));
+    const vrefs = pkg.variables.filter(v => me.text.includes(`${v.ns}::${v.name}`));
+    const prefs = pkg.parameters.filter(p => me.text.includes(`$Package::${p.name}`));
+    h += sec("References", [conns.map(c => lnk({ t: "conn", key: c.dtsid || c.name }, "🔌 " + c.name)).join("<br>"),
+      vrefs.map(v => lnk({ t: "var", key: v.key }, `@ ${v.ns}::${v.name}`)).join("<br>"),
+      prefs.map(p => lnk({ t: "param", key: p.name }, `$ ${p.name}`)).join("<br>")].filter(Boolean).join("<br>"));
+  }
+  h += sec("All properties", kv(attrsOf(el).concat(kids(el, "Property").map(p => [A(p, "Name"), p.textContent]))), false);
+  return h;
+}
+
+function detailsComp(c) {
+  if (!c) return "";
+  const pkg = cur();
+  let h = head(c.meta.badge, CAT_COLORS[c.cat], c.name, `${c.meta.label} · ${{ source: "Source", transform: "Transformation", dest: "Destination" }[c.cat]}`);
+  h += `<div class="actions">In data flow ${lnk({ t: "exec", id: c.dft.id }, c.dft.name)}</div>`;
+  const general = [["Description", c.description !== c.meta.label ? c.description : ""]];
+  for (const cn of c.conns) {
+    const cm = pkg.connByKey.get(cn.ref);
+    general.push([`Connection (${cn.name})`, cm ? lnk({ t: "conn", key: cm.dtsid || cm.name }, cm.name) : esc(cn.ref || "(not set)"), true]);
+  }
+  // Key properties first
+  const P = Object.fromEntries(c.props.map(p => [p.name, p.value]));
+  if (P.AccessMode != null && /oledb|ado|odbc/i.test(c.classId + c.meta.label)) general.push(["Access mode", (c.cat === "dest" ? ACCESS_MODE_DST : ACCESS_MODE_SRC)[P.AccessMode] || P.AccessMode]);
+  for (const k of ["OpenRowset", "OpenRowsetVariable", "TableOrViewName", "SqlCommand", "SqlCommandVariable", "SqlCommandParam", "VariableName", "FastLoadOptions"]) if (P[k]) general.push([k, P[k]]);
+  h += sec("General", kv(general));
+  // Derived column / output expressions
+  const exprRows = [];
+  for (const o of c.outputs) {
+    if (o.expression) exprRows.push([`<b>${esc(o.name)}</b>${o.isDefault ? "" : ""}`, code(o.expression, "expr")]);
+    for (const col of o.columns) if (col.expression) exprRows.push([`<b>${esc(col.name)}</b> <span class="muted">${typeStr(col)}</span>`, code(col.expression, "expr")]);
+  }
+  for (const i of c.inputs) for (const col of i.columns) if (col.expression) exprRows.push([`<b>${esc(col.name)}</b> <span class="muted">(replace)</span>`, code(col.expression, "expr")]);
+  const defOut = c.outputs.find(o => o.isDefault);
+  if (exprRows.length) h += sec(/split/i.test(c.meta.label) ? "Conditions" : "Expressions", grid(["Output / column", "Expression"], exprRows) + (defOut ? `<div class="muted" style="margin-top:6px">Default output: ${esc(defOut.name)}</div>` : ""));
+  // Column mappings for destinations
+  for (const inp of c.inputs) {
+    const extById = new Map(inp.external.map(x => [x.refId, x]));
+    if (inp.columns.length) {
+      const mapped = inp.columns.some(col => col.extId);
+      h += sec(`Input: ${inp.name}`, grid(mapped ? ["Input column", "→ Destination column", "Type"] : ["Column", "Type"],
+        inp.columns.map(col => mapped ? [esc(col.name), esc(extById.get(col.extId)?.name || ""), typeStr(col)] : [esc(col.name), typeStr(col)])), c.inputs.length < 3);
+    }
+    if (inp.external.length) h += sec(`External columns: ${inp.name}`, grid(["Column", "Type"], inp.external.map(x => [esc(x.name), typeStr(x)])), false);
+  }
+  for (const o of c.outputs) {
+    if (!o.columns.length && !o.isError) continue;
+    if (o.isError && !o.columns.length) continue;
+    h += sec(`Output: ${o.name}${o.isError ? " (error)" : ""}`, grid(["Column", "Type"], o.columns.filter(x => !o.isError || !/^(ErrorCode|ErrorColumn)$/.test(x.name)).map(x => [esc(x.name), typeStr(x)])), !o.isError && c.outputs.length < 4);
+  }
+  // Paths
+  const ps = c.dft.pipeline.paths;
+  const ins = ps.filter(p => p.to === c.id), outs = ps.filter(p => p.from === c.id);
+  h += sec("Data paths", (ins.length ? `<div class="muted">From</div><ul class="links">${ins.map(p => `<li>${lnk({ t: "comp", dft: c.dft.id, id: p.from }, p.fromComp.name)} <span class="muted">(${esc(p.out.name)})</span></li>`).join("")}</ul>` : "") +
+    (outs.length ? `<div class="muted" style="margin-top:6px">To</div><ul class="links">${outs.map(p => `<li>${p.isError ? '<span class="pill fail">error</span>' : ""}${lnk({ t: "comp", dft: c.dft.id, id: p.to }, p.toComp.name)} <span class="muted">(${esc(p.out.name)})</span></li>`).join("")}</ul>` : ""));
+  h += sec("All properties", kv(c.props.map(p => [p.name, p.value]).concat([["componentClassID", c.classId]])), false);
+  return h;
+}
+
+function detailsCons(c) {
+  const pkg = cur(), from = pkg.nodes.get(c.from), to = pkg.nodes.get(c.to);
+  const cls = ["ok", "fail", "done"][c.value];
+  return head("→", { ok: "#2e9e44", fail: "#d13438", done: "#2b6cd4" }[cls] || "#64748b", c.name, "Precedence constraint") +
+    sec("General", kv([["From", from ? lnk({ t: "exec", id: from.id }, from.name) : esc(c.from), true], ["To", to ? lnk({ t: "exec", id: to.id }, to.name) : esc(c.to), true],
+      ["Evaluation", PC_EVALOP[c.evalOp] || c.evalOp], ["Value", c.evalOp === 1 ? "" : `<span class="pill ${cls}">${PC_VALUE[c.value]}</span>`, true],
+      ["Expression", c.expression], ["Multiple constraints", c.logicalAnd ? "Logical AND (all must be true)" : "Logical OR (one must be true)"]]));
+}
+
+function detailsPath(p) {
+  const d = p.dft.id;
+  return head("→", p.isError ? "#d13438" : "#5b6b7f", p.name, p.isError ? "Error output path" : "Data path") +
+    sec("General", kv([["From", `${lnk({ t: "comp", dft: d, id: p.from }, p.fromComp.name)} <span class="muted">· ${esc(p.out.name)}</span>`, true],
+      ["To", `${lnk({ t: "comp", dft: d, id: p.to }, p.toComp.name)} <span class="muted">· ${esc(p.inp.name)}</span>`, true],
+      ["Condition", p.out.expression]])) +
+    sec("Columns added by this output", grid(["Column", "Type"], p.out.columns.map(x => [esc(x.name), typeStr(x)])));
+}
+
+function detailsConn(c) {
+  if (!c) return "";
+  let h = head(connBadge(c.type), "#0e7490", c.name, `${c.type} connection manager`);
+  h += sec("General", kv([["Type", c.type], ["Description", c.description], ["ConnectionString", c.connStr]]));
+  h += sec("Property expressions", kv(c.exprs));
+  if (c.inner) {
+    const cols = kids(kid(c.inner, "FlatFileColumns"), "FlatFileColumn");
+    if (cols.length) h += sec("Flat file columns", grid(["Column", "Type", "Width/Delim"], cols.map(x => [esc(A(x, "ObjectName")), esc(VAR_TYPES[A(x, "DataType")] || A(x, "DataType") || ""), esc(A(x, "MaximumWidth") || A(x, "ColumnWidth") || "")])));
+    const extra = attrsOf(c.inner).filter(([k]) => !/^(ConnectionString|ObjectName|DTSID|CreationName)$/.test(k));
+    h += sec("Settings", kv(extra.map(([k, v]) => [k, maskSecrets(v)])), false);
+  }
+  h += sec("Used by", usedByHtml(usedBy([c.dtsid, c.refId], c)));
+  return h;
+}
+
+function detailsVar(v) {
+  if (!v) return "";
+  const pkg = cur(), name = `${v.ns}::${v.name}`;
+  return head("@", "#b4237a", name, `${v.dtype || "Variable"} variable`) +
+    sec("General", kv([["Scope", v.scope.kind === "package" ? "Package" : lnk({ t: "exec", id: v.scope.id }, pathLabel(v.scope)), true], ["Data type", v.dtype],
+      ["Value", v.value], ["Evaluate as expression", v.evalAsExpr ? "Yes" : ""], ["Expression", v.expr], ["Read only", v.readOnly ? "Yes" : ""], ["Description", v.description]])) +
+    sec("Used by", usedByHtml(usedBy([name], v)));
+}
+
+function detailsParam(p) {
+  if (!p) return "";
+  return head("$", "#7c3aed", p.name, `Package parameter · ${p.dtype}`) +
+    sec("General", kv([["Data type", p.dtype], ["Value", p.sensitive ? "•••••• (sensitive)" : p.value], ["Required", p.required ? "Yes" : "No"], ["Sensitive", p.sensitive ? "Yes" : ""], ["Description", p.description]])) +
+    sec("Used by", usedByHtml(usedBy([`$Package::${p.name}`], p)));
+}
+
+/* =====================================================================
+   Loading
+   ===================================================================== */
+function addPackages(list) {
+  const errs = [];
+  let firstNew = -1;
+  for (const { name, text } of list) {
+    try {
+      const pkg = parsePackage(text, name);
+      const existing = S.pkgs.findIndex(p => p.fileName === name);
+      if (existing >= 0) S.pkgs[existing] = pkg; else S.pkgs.push(pkg);
+      if (firstNew < 0) firstNew = existing >= 0 ? existing : S.pkgs.length - 1;
+    } catch (e) { errs.push(e.message); console.error(e); }
+  }
+  $("#err").textContent = errs.join("\n\n");
+  if (errs.length && S.pkgs.length) alert(errs.join("\n\n"));
+  if (firstNew >= 0) {
+    const sel = $("#pkgSel");
+    sel.innerHTML = S.pkgs.map((p, i) => `<option value="${i}">${esc(p.name)} (${esc(p.fileName)})</option>`).join("");
+    sel.hidden = S.pkgs.length < 2;
+    $("#drop").style.display = "none";
+    $("#search").disabled = false; $("#exportBtn").disabled = false;
+    switchPkg(firstNew);
+  }
+}
+function switchPkg(i) {
+  S.pi = i; $("#pkgSel").value = i;
+  document.title = `${cur().name} – SSIS Visualiser`;
+  renderSide();
+  openView({ kind: "cf", id: cur().root.id });
+  select({ t: "pkg" });
+}
+$("#pkgSel").onchange = e => switchPkg(+e.target.value);
+
+async function readFiles(files) {
+  const list = [];
+  for (const f of files) list.push({ name: f.name, text: decodeBytes(await f.arrayBuffer()) });
+  addPackages(list);
+}
+$("#openBtn").onclick = $("#openBtn2").onclick = () => $("#file").click();
+$("#file").onchange = e => { readFiles([...e.target.files]); e.target.value = ""; };
+let dragDepth = 0;
+window.addEventListener("dragenter", e => { e.preventDefault(); dragDepth++; document.body.classList.add("dragging"); });
+window.addEventListener("dragleave", e => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); } });
+window.addEventListener("dragover", e => e.preventDefault());
+window.addEventListener("drop", e => {
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove("dragging");
+  const files = [...e.dataTransfer.files]; if (files.length) readFiles(files);
+});
+window.addEventListener("keydown", e => {
+  if (e.target.matches("input, select, textarea")) return;
+  if (e.key === "f") fitView();
+  if (e.key === "Escape") select(null);
+  if ((e.metaKey || e.ctrlKey) && e.key === "o") { e.preventDefault(); $("#file").click(); }
+});
+window.addEventListener("resize", () => { if (cur()) applyT(); });
+
+/* Export ---------------------------------------------------------------- */
+$("#exportBtn").onclick = () => {
+  const pad = 30, w = S.size.w + pad * 2, h = S.size.h + pad * 2;
+  const clone = vp.cloneNode(true); clone.setAttribute("transform", `translate(${pad},${pad})`);
+  clone.querySelectorAll(".sel,.match,.dim").forEach(n => n.classList.remove("sel", "match", "dim"));
+  const s = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#fff"/>${clone.outerHTML}</svg>`;
+  const a = document.createElement("a");
+  const label = S.view.kind === "cf" ? "control-flow" : (cur().nodes.get(S.view.id)?.name || S.view.kind);
+  a.href = URL.createObjectURL(new Blob([s], { type: "image/svg+xml" }));
+  a.download = `${cur().name} - ${label}.svg`.replace(/[\\/:*?"<>|]/g, "_");
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+
+/* Embedded packages (from dtsx2html.py) --------------------------------- */
+try {
+  const emb = JSON.parse($("#embedded-packages").textContent || "[]");
+  if (emb.length) addPackages(emb);
+} catch (e) { console.error("Embedded packages could not be read", e); }
+</script>
+</body>
+</html>
